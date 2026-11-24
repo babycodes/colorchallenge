@@ -1,0 +1,5 @@
+<resources>
+    <string name="camera_capturing">Memotret…</string>
+    <string name="camera_match">%1$d%% cocok</string>
+    <string name="camera_retry">Coba kamera lagi</string>
+</resources>
