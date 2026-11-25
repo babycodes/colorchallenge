@@ -40,6 +40,8 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.activity.ComponentActivity;
+import androidx.viewpager.widget.PagerAdapter;
+import androidx.viewpager.widget.ViewPager;
 import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -60,12 +62,12 @@ import java.util.Locale;
 import java.util.Random;
 
 public final class MainActivity extends ComponentActivity {
-    private static final int INK = 0xFF15132A;
-    private static final int PANEL = 0xFF24213D;
-    private static final int LINE = 0xFF484260;
-    private static final int PAPER = 0xFFF8F2FF;
-    private static final int MUTED = 0xFFC0BAD9;
-    private static final int LIME = 0xFFE6FC81;
+    private static final int INK = 0xFF101016;
+    private static final int PANEL = 0xFF26242C;
+    private static final int LINE = 0xFF554F59;
+    private static final int PAPER = 0xFFFFFCF4;
+    private static final int MUTED = 0xFFD4CCD0;
+    private static final int LIME = 0xFF78F792;
     private static final int LILAC = 0xFFBBA8FF;
     private static final int PEACH = 0xFFFFA584;
     private static final int MATCH = ViewGroup.LayoutParams.MATCH_PARENT;
@@ -75,7 +77,7 @@ public final class MainActivity extends ComponentActivity {
     };
     private static final int[] PALETTE_POSTER = {0xFFD5CCFF, 0xFFA9EDF5, 0xFFFFD18B, 0xFFFFC8DD};
 
-    private enum Page { HOME, PLAYERS, HUNT, CAMERA, REVIEW, RESULTS }
+    private enum Page { HOME, PLAYERS, TARGET, HUNT, CAMERA, REVIEW, RESULTS }
     private record Shot(String file, int color) {}
 
     private final ArrayList<String> players = new ArrayList<>();
@@ -98,6 +100,7 @@ public final class MainActivity extends ComponentActivity {
     private ScrollView scroll;
     private TextView timerLabel;
     private View huntProgress;
+    private TextView cameraButton;
     private int backdrop;
     private boolean darkSystemIcons;
     private ValueAnimator cameraTint;
@@ -132,7 +135,7 @@ public final class MainActivity extends ComponentActivity {
         page = Page.valueOf(state.getString("page", Page.HOME.name()));
         paletteIndex = state.getInt("palette");
         swatchIndex = state.getInt("swatch");
-        seconds = state.getInt("seconds", 30);
+        seconds = Math.max(HuntClock.UNLOCK_SECONDS, state.getInt("seconds", 30));
         currentPlayer = state.getInt("player");
         deadline = state.getLong("deadline");
         ArrayList<String> names = state.getStringArrayList("names");
@@ -211,7 +214,7 @@ public final class MainActivity extends ComponentActivity {
         switch (page) {
             case HOME -> lobby();
             case PLAYERS -> roster();
-            case HUNT -> hunt();
+            case TARGET, HUNT -> hunt();
             case CAMERA -> {
                 if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
                     viewfinder();
@@ -229,86 +232,74 @@ public final class MainActivity extends ComponentActivity {
 
     private void lobby() {
         header("KROMA KLUB", players.size() + " pemain ＋", () -> show(Page.PLAYERS));
-        LinearLayout hero = row();
-        hero.setGravity(Gravity.CENTER_VERTICAL);
-        GradientDrawable heroFill = new GradientDrawable(GradientDrawable.Orientation.BL_TR,
-            new int[] {0xFF382D73, 0xFF6743AA});
-        heroFill.setCornerRadius(dp(26));
-        hero.setBackground(heroFill);
-        pad(hero, 17, 12, 10, 12);
-        LinearLayout lead = column();
-        lead.addView(display("Misi Warna", 37, PAPER));
-        TextView intro = text("Temukan warna target di sekitarmu.", 14, PAPER, false);
-        pad(intro, 0, 8, 0, 0);
-        lead.addView(intro);
-        hero.addView(lead, new LinearLayout.LayoutParams(0, WRAP, 1));
+        FrameLayout cover = new FrameLayout(this);
+        cover.setBackground(background(0xFF472D79, 26, 0));
+        cover.setClipToOutline(true);
+        cover.addView(new BandArt(this), new FrameLayout.LayoutParams(MATCH, MATCH));
         StickerView mascot = new StickerView(this);
-        hero.addView(mascot, new LinearLayout.LayoutParams(dp(112), dp(100)));
-        block(body, hero, 16);
+        mascot.setRotation(9f);
+        cover.addView(mascot, new FrameLayout.LayoutParams(dp(152), dp(156), Gravity.END | Gravity.CENTER_VERTICAL));
+        LinearLayout title = column();
+        title.setGravity(Gravity.CENTER_VERTICAL);
+        pad(title, 17, 10, 0, 12);
+        TextView top = display("MISI", 38, PAPER);
+        TextView bottom = display("WARNA", 42, 0xFFFFD870);
+        top.setShadowLayer(dp(1), dp(2), dp(3), INK);
+        bottom.setShadowLayer(dp(1), dp(2), dp(3), INK);
+        title.addView(top);
+        title.addView(bottom);
+        cover.addView(title, new FrameLayout.LayoutParams(WRAP, MATCH));
+        int screenHeight = getResources().getConfiguration().screenHeightDp;
+        fixedBlock(body, cover, Math.max(126, Math.min(182, screenHeight / 4)), 10);
         pop(mascot);
 
-        TextView choose = text("Pilih palet", 19, PAPER, true);
-        block(body, choose, 16);
-        LinearLayout poster = row();
-        poster.setGravity(Gravity.CENTER_VERTICAL);
-        pad(poster, 12, 8, 15, 8);
-        StickerView paletteArt = new StickerView(this, PALETTE_ART[paletteIndex]);
-        poster.addView(paletteArt, new LinearLayout.LayoutParams(dp(106), dp(98)));
-        LinearLayout paletteInfo = column();
-        pad(paletteInfo, 6, 0, 0, 0);
-        TextView paletteTitle = display(Palettes.ALL[paletteIndex].name(), 27, INK);
-        paletteInfo.addView(paletteTitle);
-        TextView description = text(Palettes.ALL[paletteIndex].description(), 13, INK, false);
-        block(paletteInfo, description, 4);
-        poster.addView(paletteInfo, new LinearLayout.LayoutParams(0, WRAP, 1));
-        block(body, poster, 8);
-        poster.setBackground(background(PALETTE_POSTER[paletteIndex], 21, 0));
-        pop(paletteArt);
-
-        ArrayList<LinearLayout> cards = new ArrayList<>();
-        for (int rowIndex = 0; rowIndex < 2; rowIndex++) {
-            LinearLayout grid = row();
-            for (int columnIndex = 0; columnIndex < 2; columnIndex++) {
-                int index = rowIndex * 2 + columnIndex;
-                var palette = Palettes.ALL[index];
-                LinearLayout card = column();
-                pad(card, 9, 9, 9, 7);
-                card.setBackground(ripple(PANEL, 15, index == paletteIndex ? LIME : LINE));
-                card.setSelected(index == paletteIndex);
-                card.setContentDescription(palette.name());
-                LinearLayout colors = row();
-                colors.setBackground(background(PANEL, 8, 0));
-                colors.setClipToOutline(true);
-                for (var swatch : palette.colors()) {
-                    View chip = new View(this);
-                    chip.setBackgroundColor(swatch.rgb());
-                    colors.addView(chip, new LinearLayout.LayoutParams(0, MATCH, 1));
-                }
-                card.addView(colors, new LinearLayout.LayoutParams(MATCH, dp(15)));
-                TextView title = text(palette.name(), 15, PAPER, true);
-                pad(title, 1, 7, 0, 0);
-                card.addView(title);
-                cards.add(card);
-                card.setOnClickListener(view -> {
-                    if (paletteIndex == index) return;
-                    paletteIndex = index;
-                    paletteTitle.setText(palette.name());
-                    description.setText(palette.description());
-                    poster.setBackground(background(PALETTE_POSTER[index], 21, 0));
-                    paletteArt.setArt(PALETTE_ART[index]);
-                    pop(paletteArt);
-                    for (int i = 0; i < cards.size(); i++) {
-                        boolean selected = i == index;
-                        cards.get(i).setBackground(ripple(PANEL, 15, selected ? LIME : LINE));
-                        cards.get(i).setSelected(selected);
-                    }
-                });
-                LinearLayout.LayoutParams box = new LinearLayout.LayoutParams(0, WRAP, 1);
-                if (columnIndex == 1) box.setMarginStart(dp(8));
-                grid.addView(card, box);
+        ViewPager deck = new ViewPager(this);
+        deck.setClipToPadding(false);
+        deck.setPadding(dp(26), 0, dp(26), 0);
+        deck.setPageMargin(dp(12));
+        deck.setAdapter(new PagerAdapter() {
+            @Override public int getCount() { return Palettes.ALL.length; }
+            @Override public boolean isViewFromObject(View view, Object object) { return view == object; }
+            @Override public Object instantiateItem(ViewGroup pages, int index) {
+                FrameLayout card = paletteCard(index);
+                pages.addView(card);
+                return card;
             }
-            block(body, grid, 8);
-        }
+            @Override public void destroyItem(ViewGroup pages, int index, Object card) {
+                pages.removeView((View) card);
+            }
+        });
+        deck.setPageTransformer(false, (card, position) -> {
+            float scale = 1f - .08f * Math.min(1f, Math.abs(position));
+            card.setScaleY(scale);
+            card.setAlpha(1f - .35f * Math.min(1f, Math.abs(position)));
+        });
+        deck.setCurrentItem(paletteIndex, false);
+        fixedBlock(body, deck, Math.max(174, Math.min(258, screenHeight / 3)), 16);
+        LinearLayout arrows = row();
+        arrows.setGravity(Gravity.CENTER);
+        TextView prev = button("‹", PANEL, PAPER, () -> deck.setCurrentItem(deck.getCurrentItem() - 1, true));
+        TextView next = button("›", PANEL, PAPER, () -> deck.setCurrentItem(deck.getCurrentItem() + 1, true));
+        prev.setContentDescription("Palet sebelumnya");
+        next.setContentDescription("Palet berikutnya");
+        arrows.addView(prev, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        TextView description = text("", 14, PAPER, true);
+        description.setGravity(Gravity.CENTER);
+        arrows.addView(description, new LinearLayout.LayoutParams(0, WRAP, 1));
+        arrows.addView(next, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        Runnable selection = () -> {
+            description.setText(Palettes.ALL[paletteIndex].description());
+            enabled(prev, paletteIndex > 0);
+            enabled(next, paletteIndex + 1 < Palettes.ALL.length);
+        };
+        selection.run();
+        deck.addOnPageChangeListener(new ViewPager.SimpleOnPageChangeListener() {
+            @Override public void onPageSelected(int position) {
+                paletteIndex = position;
+                selection.run();
+            }
+        });
+        block(body, arrows, 7);
 
         LinearLayout timing = row();
         timing.setGravity(Gravity.CENTER_VERTICAL);
@@ -324,11 +315,11 @@ public final class MainActivity extends ComponentActivity {
         plus.setContentDescription("Tambah waktu");
         Runnable update = () -> {
             duration.setText(time(seconds));
-            enabled(minus, seconds > 10);
+            enabled(minus, seconds > HuntClock.UNLOCK_SECONDS);
             enabled(plus, seconds < 120);
         };
         minus.setOnClickListener(view -> {
-            seconds = Math.max(10, seconds - 5);
+            seconds = Math.max(HuntClock.UNLOCK_SECONDS, seconds - 5);
             update.run();
         });
         plus.setOnClickListener(view -> {
@@ -339,29 +330,53 @@ public final class MainActivity extends ComponentActivity {
         timing.addView(minus, new LinearLayout.LayoutParams(dp(48), dp(48)));
         timing.addView(duration, new LinearLayout.LayoutParams(dp(62), WRAP));
         timing.addView(plus, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        block(body, timing, 14);
+        LinearLayout.LayoutParams timerBox = new LinearLayout.LayoutParams(MATCH, WRAP);
+        timerBox.setMargins(dp(20), dp(6), dp(20), 0);
+        shell.addView(timing, timerBox);
         footer(button("Mulai misi  →", LIME, INK, this::beginRound));
+    }
+
+    private FrameLayout paletteCard(int index) {
+        FrameLayout card = new FrameLayout(this);
+        card.setBackground(background(PAPER, 24, 0));
+        card.setClipToOutline(true);
+        FrameLayout inset = new FrameLayout(this);
+        inset.setBackground(background(PALETTE_POSTER[index], 20, 0));
+        inset.setClipToOutline(true);
+        FrameLayout.LayoutParams margins = new FrameLayout.LayoutParams(MATCH, MATCH);
+        margins.setMargins(dp(4), dp(4), dp(4), dp(4));
+        card.addView(inset, margins);
+        inset.addView(new BandArt(this, Palettes.ALL[index]), new FrameLayout.LayoutParams(MATCH, MATCH));
+        StickerView icon = new StickerView(this, PALETTE_ART[index]);
+        icon.setRotation(-7f);
+        FrameLayout.LayoutParams artBox = new FrameLayout.LayoutParams(dp(158), MATCH, Gravity.CENTER_HORIZONTAL);
+        artBox.bottomMargin = dp(48);
+        inset.addView(icon, artBox);
+        TextView name = display(Palettes.ALL[index].name(), 27, PAPER);
+        name.setGravity(Gravity.CENTER);
+        name.setBackground(background(INK, 18, 0));
+        pad(name, 17, 5, 17, 7);
+        FrameLayout.LayoutParams bottom = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        bottom.bottomMargin = dp(13);
+        inset.addView(name, bottom);
+        return card;
+    }
+
+    private void fixedBlock(LinearLayout parent, View view, int height, int gap) {
+        LinearLayout.LayoutParams box = new LinearLayout.LayoutParams(MATCH, dp(height));
+        box.topMargin = dp(gap);
+        parent.addView(view, box);
     }
 
     private void roster() {
         header("PEMAIN", "Kembali", () -> show(Page.HOME));
-        LinearLayout banner = row();
-        banner.setGravity(Gravity.CENTER_VERTICAL);
-        banner.setBackground(background(PANEL, 21, LINE));
-        pad(banner, 14, 10, 8, 10);
-        LinearLayout message = column();
-        message.addView(display("Siapa ikut?", 35, PAPER));
-        block(message, text("Masukkan nama 2–4 pemain.", 15, MUTED, false), 7);
-        banner.addView(message, new LinearLayout.LayoutParams(0, WRAP, 1));
-        StickerView team = new StickerView(this, StickerView.Art.TEAM);
-        banner.addView(team, new LinearLayout.LayoutParams(dp(96), dp(84)));
-        block(body, banner, 16);
-        pop(team);
+        block(body, display("Tim pencari", 44, PAPER), 20);
+        block(body, text("Beri nama untuk 2–4 pemain.", 16, MUTED, false), 6);
         for (int index = 0; index < players.size(); index++) {
             int slot = index;
             LinearLayout lane = row();
             lane.setGravity(Gravity.CENTER_VERTICAL);
-            lane.setBackground(background(PANEL, 17, LINE));
+            lane.setBackground(background(PANEL, 22, 0));
             pad(lane, 10, 4, 6, 4);
             TextView number = tag(String.valueOf(index + 1), PALETTE_POSTER[index], INK);
             lane.addView(number);
@@ -383,7 +398,7 @@ public final class MainActivity extends ComponentActivity {
                 }
                 @Override public void afterTextChanged(Editable value) {}
             });
-            lane.addView(field, new LinearLayout.LayoutParams(0, dp(52), 1));
+            lane.addView(field, new LinearLayout.LayoutParams(0, dp(62), 1));
             if (players.size() > 2) {
                 TextView remove = button("×", LINE, PAPER, () -> {
                     players.remove(slot);
@@ -407,32 +422,38 @@ public final class MainActivity extends ComponentActivity {
         discardShots();
         swatchIndex = random.nextInt(Palettes.ALL[paletteIndex].colors().length);
         currentPlayer = 0;
-        deadline = SystemClock.elapsedRealtime() + seconds * 1000L;
-        show(Page.HUNT);
+        deadline = 0;
+        show(Page.TARGET);
     }
 
     private void hunt() {
-        header("TARGET MISI", "Keluar", this::confirmExit);
-        block(body, text("Cari benda yang warnanya mendekati target.", 17, MUTED, false), 22);
-        LinearLayout swatch = row();
+        boolean searching = page == Page.HUNT;
+        header(searching ? "PENCARIAN" : "WARNA TARGET", "Keluar", this::confirmExit);
+        TextView prompt = text(searching ? "Sisa waktu mencari" : "Ingat warna yang akan dicari", 18, PAPER, true);
+        prompt.setGravity(Gravity.CENTER);
+        block(body, prompt, 24);
+        LinearLayout specimen = column();
         int color = target().rgb();
         int foreground = ColorMatch.light(color) ? Color.BLACK : Color.WHITE;
-        swatch.setBackground(background(color, 24, 0));
-        pad(swatch, 19, 16, 19, 17);
-        swatch.setGravity(Gravity.CENTER_VERTICAL);
-        swatch.setMinimumHeight(dp(150));
-        LinearLayout swatchName = column();
-        swatchName.addView(text(Palettes.ALL[paletteIndex].name(), 14, foreground, true));
-        block(swatchName, display(target().name(), 33, foreground), 6);
-        swatch.addView(swatchName, new LinearLayout.LayoutParams(0, WRAP, 1));
-        StickerView targetArt = new StickerView(this, StickerView.Art.TARGET);
-        swatch.addView(targetArt, new LinearLayout.LayoutParams(dp(101), dp(100)));
-        pop(targetArt);
-        block(body, swatch, 15);
-        timerLabel = display("", 72, LIME);
+        specimen.setBackground(background(color, 30, 0));
+        pad(specimen, 20, 22, 20, 20);
+        specimen.setGravity(Gravity.BOTTOM);
+        specimen.setMinimumHeight(dp(searching ? 158 : 239));
+        specimen.addView(text(Palettes.ALL[paletteIndex].name(), 15, foreground, true));
+        specimen.addView(display(target().name(), 39, foreground));
+        if (!searching) {
+            block(body, specimen, 16);
+            block(body, text("Semua pemain mencari warna ini. Tekan mulai saat semua siap.", 17, MUTED, false), 18);
+            footer(button("Mulai mencari", LIME, INK, () -> {
+                deadline = SystemClock.elapsedRealtime() + seconds * 1000L;
+                show(Page.HUNT);
+            }));
+            return;
+        }
+        timerLabel = display("", 72, PAPER);
         timerLabel.setGravity(Gravity.CENTER);
-        timerLabel.setTypeface(Typeface.create("monospace", Typeface.BOLD));
-        block(body, timerLabel, 16);
+        block(body, timerLabel, 8);
+        block(body, specimen, 12);
         FrameLayout track = new FrameLayout(this);
         track.setBackground(background(PANEL, 5, 0));
         track.setClipToOutline(true);
@@ -446,26 +467,39 @@ public final class MainActivity extends ComponentActivity {
         TextView first = text("Giliran pertama · " + player(0), 15, MUTED, true);
         first.setGravity(Gravity.CENTER);
         block(body, first, 4);
-        footer(button("Buka kamera sekarang  →", LIME, INK, () -> show(Page.CAMERA)));
-        clock.post(tick);
+        block(body, text("Kamera tersedia setelah 20 detik mencari.", 14, MUTED, false), 8);
+        cameraButton = button("Buka kamera", LIME, INK, () -> {
+            if (HuntClock.cameraAvailable(deadline, seconds, SystemClock.elapsedRealtime())) show(Page.CAMERA);
+        });
+        cameraButton.setVisibility(View.GONE);
+        footer(cameraButton);
+        updateClock();
     }
 
     private void updateClock() {
         if (page != Page.HUNT) return;
-        long remaining = deadline - SystemClock.elapsedRealtime();
+        long now = SystemClock.elapsedRealtime();
+        long remaining = HuntClock.remaining(deadline, now);
         String shown = time((int) Math.max(0, (remaining + 999) / 1000));
         if (!shown.contentEquals(timerLabel.getText())) timerLabel.setText(shown);
         if (remaining <= 5_000) timerLabel.setTextColor(PEACH);
         huntProgress.setScaleX(Math.max(0f, remaining / (seconds * 1000f)));
-        if (remaining <= 0) show(Page.CAMERA);
-        else clock.postDelayed(tick, 100);
+        if (cameraButton.getVisibility() != View.VISIBLE && HuntClock.cameraAvailable(deadline, seconds, now)) {
+            cameraButton.setVisibility(View.VISIBLE);
+            pop(cameraButton);
+        }
+        if (remaining > 0) clock.postDelayed(tick, Math.min(100L, remaining));
     }
 
     private void showCameraAccess(boolean denied) {
         stopCamera();
         body.removeAllViews();
         header("KAMERA", "Keluar", this::confirmExit);
-        block(body, display("Aktifkan kamera", 36, PAPER), 24);
+        StickerView lens = new StickerView(this, StickerView.Art.TARGET);
+        lens.setBackground(background(0xFF472D79, 24, 0));
+        fixedBlock(body, lens, 150, 20);
+        pop(lens);
+        block(body, display("Aktifkan kamera", 36, PAPER), 16);
         block(body, text("Kroma Klub memakai kamera untuk membaca warna dan memotret temuan pemain.",
             17, MUTED, false), 12);
         block(body, button("Izinkan kamera", LIME, INK, () -> permission.launch(Manifest.permission.CAMERA)), 20);
@@ -489,10 +523,8 @@ public final class MainActivity extends ComponentActivity {
         header("GILIRAN " + (currentPlayer + 1) + "/" + players.size(), "Keluar", this::confirmExit);
         LinearLayout hud = column();
         pad(hud, 14, 10, 14, 12);
-        hud.setBackground(background(INK, 15, 0));
-        hud.addView(display(player(currentPlayer), 30, PAPER));
-        hud.addView(text("Arahkan kotak bidik ke bendamu.", 14, MUTED, false));
-        block(body, hud, 14);
+        hud.addView(display(player(currentPlayer), 28, INK));
+        hud.addView(text("Bidik bagian benda yang ingin dipotret.", 14, INK, false));
         FrameLayout frame = new FrameLayout(this) {
             @Override protected void onMeasure(int widthSpec, int heightSpec) {
                 super.onMeasure(widthSpec, MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(widthSpec),
@@ -521,7 +553,12 @@ public final class MainActivity extends ComponentActivity {
             }
         };
         frame.addView(reticle, new FrameLayout.LayoutParams(MATCH, MATCH));
-        block(body, frame, 12);
+        LinearLayout cameraCard = column();
+        pad(cameraCard, 8, 8, 8, 5);
+        cameraCard.setBackground(background(PAPER, 24, 0));
+        cameraCard.addView(frame, new LinearLayout.LayoutParams(MATCH, WRAP));
+        cameraCard.addView(hud);
+        block(body, cameraCard, 16);
 
         LinearLayout reading = row();
         reading.setGravity(Gravity.CENTER_VERTICAL);
@@ -631,7 +668,17 @@ public final class MainActivity extends ComponentActivity {
         caption.addView(name, new LinearLayout.LayoutParams(0, WRAP, 1));
         caption.addView(tag("Siap dikunci", LIME, INK));
         card.addView(caption);
-        block(body, card, 18);
+        FrameLayout stack = new FrameLayout(this);
+        pad(stack, 9, 12, 9, 12);
+        stack.setClipChildren(false);
+        if (currentPlayer > 0) {
+            View backing = new View(this);
+            backing.setBackground(background(0xFFE9DEC8, 22, INK));
+            backing.setRotation(3f);
+            stack.addView(backing, new FrameLayout.LayoutParams(MATCH, MATCH));
+        }
+        stack.addView(card, new FrameLayout.LayoutParams(MATCH, WRAP));
+        block(body, stack, 16);
         pop(card);
         TextView revealHint = tag("Skor dibuka setelah foto terakhir dikunci", INK, PAPER);
         revealHint.setGravity(Gravity.CENTER);
@@ -683,10 +730,12 @@ public final class MainActivity extends ComponentActivity {
         boolean tie = ordered.get(1).score() == ordered.get(0).score();
         LinearLayout podium = row();
         podium.setGravity(Gravity.CENTER_VERTICAL);
-        podium.setBackground(background(0xFFFFD677, 22, 0));
+        int targetColor = target().rgb();
+        int titleInk = ColorMatch.light(targetColor) ? Color.BLACK : Color.WHITE;
+        podium.setBackground(background(targetColor, 26, 0));
         pad(podium, 14, 12, 11, 12);
         LinearLayout podiumLabel = column();
-        podiumLabel.addView(display(tie ? "Seri di puncak!" : player(best) + " juara!", 33, INK));
+        podiumLabel.addView(display(tie ? "Seri di puncak!" : player(best) + " juara!", 34, titleInk));
         TextView color = tag("Target · " + target().name(), target().rgb(),
             ColorMatch.light(target().rgb()) ? Color.BLACK : Color.WHITE);
         LinearLayout.LayoutParams label = new LinearLayout.LayoutParams(WRAP, WRAP);
@@ -706,15 +755,19 @@ public final class MainActivity extends ComponentActivity {
         pop(crown);
         block(body, podium, 15);
 
+        LinearLayout columns = row();
+        columns.setGravity(Gravity.BOTTOM);
+        columns.setBackground(background(PANEL, 24, 0));
+        pad(columns, 5, 16, 5, 15);
         for (int place = 0; place < ordered.size(); place++) {
             var result = ordered.get(place);
             int index = result.player();
             Shot shot = shots.get(index);
             int rank = place + 1;
             while (rank > 1 && ordered.get(rank - 2).score() == result.score()) rank--;
-            LinearLayout card = row();
-            card.setGravity(Gravity.CENTER_VERTICAL);
-            card.setBackground(ripple(PANEL, 18, rank == 1 ? LILAC : LINE));
+            LinearLayout card = column();
+            card.setGravity(Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+            card.setBackground(ripple(PANEL, 14, 0));
             card.setOnClickListener(view -> {
                 ImageView full = picture(shot, player(index));
                 full.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -726,37 +779,32 @@ public final class MainActivity extends ComponentActivity {
                     .setPositiveButton("Tutup", null)
                     .show();
             });
-            pad(card, 9, 9, 11, 9);
-            card.addView(picture(shot, player(index)), new LinearLayout.LayoutParams(dp(66), dp(66)));
-
-            LinearLayout details = column();
-            pad(details, 10, 0, 0, 0);
-            LinearLayout stats = row();
-            stats.setGravity(Gravity.CENTER_VERTICAL);
-            TextView name = text(rank + ". " + player(index), 15, PAPER, true);
-            stats.addView(name, new LinearLayout.LayoutParams(0, WRAP, 1));
-            TextView percentage = text(result.score() + "%", 19, rank == 1 ? LIME : PAPER, true);
-            stats.addView(percentage);
-            details.addView(stats);
-            LinearLayout track = row();
-            track.setBackground(background(INK, 8, 0));
-            track.setClipToOutline(true);
-            View bar = new View(this);
-            bar.setBackgroundColor(shot.color());
-            track.setWeightSum(100);
-            track.addView(bar, new LinearLayout.LayoutParams(0, MATCH, result.score()));
-            bar.setPivotX(0);
-            bar.setScaleX(0f);
-            long delay = 215L + place * 90L;
-            bar.animate().scaleX(1f).setStartDelay(delay).setDuration(390).start();
-            percentage.setAlpha(0f);
-            percentage.animate().alpha(1f).setStartDelay(delay + 100).setDuration(250).start();
-            LinearLayout.LayoutParams line = new LinearLayout.LayoutParams(MATCH, dp(8));
-            line.topMargin = dp(7);
-            details.addView(track, line);
-            card.addView(details, new LinearLayout.LayoutParams(0, WRAP, 1));
-            block(body, card, 9);
+            pad(card, 3, 4, 3, 4);
+            TextView medal = tag("#" + rank, rank == 1 ? 0xFFFFD267 : PAPER, INK);
+            card.addView(medal);
+            LinearLayout pillar = column();
+            pillar.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+            pillar.setBackground(background(shot.color(), 17, LINE));
+            pillar.setClipToOutline(true);
+            ImageView image = picture(shot, player(index));
+            pillar.addView(image, new LinearLayout.LayoutParams(MATCH, dp(48)));
+            int contrast = ColorMatch.light(shot.color()) ? Color.BLACK : Color.WHITE;
+            TextView score = display(result.score() + "%", ordered.size() == 4 ? 18 : 22, contrast);
+            block(pillar, score, 7);
+            score.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams height = new LinearLayout.LayoutParams(MATCH, dp(98 + result.score()));
+            height.topMargin = dp(6);
+            card.addView(pillar, height);
+            TextView name = text(player(index), 14, PAPER, true);
+            name.setGravity(Gravity.CENTER);
+            name.setMaxLines(2);
+            name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            name.setMinLines(2);
+            block(card, name, 8);
+            columns.addView(card, new LinearLayout.LayoutParams(0, WRAP, 1));
+            enter(pillar, 180L + place * 85L);
         }
+        block(body, columns, 15);
         block(body, button("Main lagi", PANEL, PAPER, this::returnToLobby), 13);
         footer(button("Bagikan hasil", LIME, INK, () -> shareResults(ordered)));
     }
@@ -875,6 +923,8 @@ public final class MainActivity extends ComponentActivity {
     private void footer(TextView action) {
         LinearLayout foot = column();
         pad(foot, 20, 9, 20, 12);
+        action.setMinimumHeight(dp(56));
+        action.setTextSize(18);
         foot.addView(action, new LinearLayout.LayoutParams(MATCH, WRAP));
         shell.addView(foot);
         enter(foot, 115);
@@ -931,7 +981,7 @@ public final class MainActivity extends ComponentActivity {
         control.setMinimumHeight(dp(48));
         control.setMinWidth(0);
         control.setMinimumWidth(0);
-        control.setBackground(ripple(fill, 15, 0));
+        control.setBackground(ripple(fill, 32, 0));
         pad(control, 12, 10, 12, 10);
         control.setOnClickListener(view -> action.run());
         return control;
