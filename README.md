@@ -6,8 +6,8 @@ Game Android native berbahasa Indonesia untuk 2–4 pemain yang bergiliran memak
 
 1. Pilih palet **Spektrum**, **Pesisir**, **Pasar Sore**, atau **Awan Gula**. Ketuk tombol pemain di kanan atas untuk mengubah nama atau jumlah pemain.
 2. Atur waktu mencari (10–120 detik), lalu mulai. Semua pemain mencari benda berdasarkan target acak yang sama. Kamera tersedia saat waktu habis atau saat pemain memilih untuk lanjut lebih awal.
-3. Arahkan kotak bidik ke bagian benda yang mewakili warnanya. Latar dan persentase berubah mengikuti warna rata-rata di kotak bidik. Ketuk **Ambil foto** untuk menyimpan frame dan skornya, lalu ulangi untuk pemain berikutnya.
-4. Bandingkan skor dan foto semua pemain. **Bagikan hasil** membuat gambar ringkasan lewat menu berbagi Android.
+3. Arahkan kotak bidik ke bagian benda yang mewakili warnanya. Latar mengikuti warna rata-rata di kotak bidik. Ketuk **Ambil foto**, periksa temuanmu, lalu kunci foto untuk lanjut ke pemain berikutnya.
+4. Skor dan peringkat dihitung saat foto terakhir dikunci. Bandingkan skor dan foto semua pemain. **Bagikan hasil** membuat gambar ringkasan lewat menu berbagi Android.
 
 Skor dihitung dari jarak warna CIELAB antara target dan area tengah frame. Semakin kecil jaraknya, semakin tinggi skornya. Foto disimpan sementara di cache aplikasi.
 

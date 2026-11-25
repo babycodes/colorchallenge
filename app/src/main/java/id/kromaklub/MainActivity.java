@@ -1,6 +1,7 @@
 package id.kromaklub;
 
 import android.Manifest;
+import android.animation.ValueAnimator;
 import android.content.ClipData;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -27,6 +28,8 @@ import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.DecelerateInterpolator;
+import android.view.animation.OvershootInterpolator;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -42,6 +45,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.camera.view.PreviewView;
 import androidx.core.content.FileProvider;
+import androidx.core.graphics.ColorUtils;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
@@ -51,7 +55,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.List;
 import java.util.Locale;
 import java.util.Random;
 
@@ -66,9 +70,13 @@ public final class MainActivity extends ComponentActivity {
     private static final int PEACH = 0xFFFFA584;
     private static final int MATCH = ViewGroup.LayoutParams.MATCH_PARENT;
     private static final int WRAP = ViewGroup.LayoutParams.WRAP_CONTENT;
+    private static final StickerView.Art[] PALETTE_ART = {
+        StickerView.Art.SPECTRUM, StickerView.Art.COAST, StickerView.Art.MARKET, StickerView.Art.CLOUD
+    };
+    private static final int[] PALETTE_POSTER = {0xFFD5CCFF, 0xFFA9EDF5, 0xFFFFD18B, 0xFFFFC8DD};
 
     private enum Page { HOME, PLAYERS, HUNT, CAMERA, REVIEW, RESULTS }
-    private record Shot(String file, int color, int score) {}
+    private record Shot(String file, int color) {}
 
     private final ArrayList<String> players = new ArrayList<>();
     private final ArrayList<Shot> shots = new ArrayList<>();
@@ -89,6 +97,10 @@ public final class MainActivity extends ComponentActivity {
     private LinearLayout body;
     private ScrollView scroll;
     private TextView timerLabel;
+    private View huntProgress;
+    private int backdrop;
+    private boolean darkSystemIcons;
+    private ValueAnimator cameraTint;
 
     private final ActivityResultLauncher<String> permission =
         registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
@@ -132,7 +144,7 @@ public final class MainActivity extends ComponentActivity {
         int[] colors = state.getIntArray("colors");
         if (files != null && colors != null) {
             for (int i = 0; i < files.size(); i++) {
-                shots.add(new Shot(files.get(i), colors[i], ColorMatch.percent(target().rgb(), colors[i])));
+                shots.add(new Shot(files.get(i), colors[i]));
             }
         }
     }
@@ -176,6 +188,7 @@ public final class MainActivity extends ComponentActivity {
         canvas = new FrameLayout(this);
         setBackdrop(INK);
         shell = column();
+        shell.setClipChildren(false);
         canvas.addView(shell, new FrameLayout.LayoutParams(MATCH, MATCH));
         ViewCompat.setOnApplyWindowInsetsListener(shell, (view, insets) -> {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars()
@@ -189,6 +202,7 @@ public final class MainActivity extends ComponentActivity {
         scroll.setClipToPadding(false);
         shell.addView(scroll, new LinearLayout.LayoutParams(MATCH, 0, 1));
         body = column();
+        body.setClipChildren(false);
         body.setFocusableInTouchMode(true);
         pad(body, 20, 14, 20, 18);
         scroll.addView(body, new ScrollView.LayoutParams(MATCH, WRAP));
@@ -208,27 +222,48 @@ public final class MainActivity extends ComponentActivity {
             case REVIEW -> review();
             case RESULTS -> results();
         }
+        for (int i = 0; i < body.getChildCount(); i++) {
+            enter(body.getChildAt(i), Math.min(i * 35L, 160L));
+        }
     }
 
     private void lobby() {
         header("KROMA KLUB", players.size() + " pemain ＋", () -> show(Page.PLAYERS));
         LinearLayout hero = row();
         hero.setGravity(Gravity.CENTER_VERTICAL);
-        hero.setBackground(background(PANEL, 26, LINE));
-        pad(hero, 16, 16, 10, 16);
+        GradientDrawable heroFill = new GradientDrawable(GradientDrawable.Orientation.BL_TR,
+            new int[] {0xFF382D73, 0xFF6743AA});
+        heroFill.setCornerRadius(dp(26));
+        hero.setBackground(heroFill);
+        pad(hero, 17, 12, 10, 12);
         LinearLayout lead = column();
-        lead.addView(display("Misi\nWarna", 41, PAPER));
-        TextView intro = text("Temukan warna target di sekitarmu.", 15, MUTED, false);
+        lead.addView(display("Misi Warna", 37, PAPER));
+        TextView intro = text("Temukan warna target di sekitarmu.", 14, PAPER, false);
         pad(intro, 0, 8, 0, 0);
         lead.addView(intro);
         hero.addView(lead, new LinearLayout.LayoutParams(0, WRAP, 1));
-        hero.addView(new PrismView(this), new LinearLayout.LayoutParams(dp(108), dp(110)));
+        StickerView mascot = new StickerView(this);
+        hero.addView(mascot, new LinearLayout.LayoutParams(dp(112), dp(100)));
         block(body, hero, 16);
+        pop(mascot);
 
         TextView choose = text("Pilih palet", 19, PAPER, true);
-        block(body, choose, 20);
-        TextView description = text(Palettes.ALL[paletteIndex].description(), 14, MUTED, false);
-        block(body, description, 3);
+        block(body, choose, 16);
+        LinearLayout poster = row();
+        poster.setGravity(Gravity.CENTER_VERTICAL);
+        pad(poster, 12, 8, 15, 8);
+        StickerView paletteArt = new StickerView(this, PALETTE_ART[paletteIndex]);
+        poster.addView(paletteArt, new LinearLayout.LayoutParams(dp(106), dp(98)));
+        LinearLayout paletteInfo = column();
+        pad(paletteInfo, 6, 0, 0, 0);
+        TextView paletteTitle = display(Palettes.ALL[paletteIndex].name(), 27, INK);
+        paletteInfo.addView(paletteTitle);
+        TextView description = text(Palettes.ALL[paletteIndex].description(), 13, INK, false);
+        block(paletteInfo, description, 4);
+        poster.addView(paletteInfo, new LinearLayout.LayoutParams(0, WRAP, 1));
+        block(body, poster, 8);
+        poster.setBackground(background(PALETTE_POSTER[paletteIndex], 21, 0));
+        pop(paletteArt);
 
         ArrayList<LinearLayout> cards = new ArrayList<>();
         for (int rowIndex = 0; rowIndex < 2; rowIndex++) {
@@ -249,14 +284,19 @@ public final class MainActivity extends ComponentActivity {
                     chip.setBackgroundColor(swatch.rgb());
                     colors.addView(chip, new LinearLayout.LayoutParams(0, MATCH, 1));
                 }
-                card.addView(colors, new LinearLayout.LayoutParams(MATCH, dp(29)));
+                card.addView(colors, new LinearLayout.LayoutParams(MATCH, dp(15)));
                 TextView title = text(palette.name(), 15, PAPER, true);
                 pad(title, 1, 7, 0, 0);
                 card.addView(title);
                 cards.add(card);
                 card.setOnClickListener(view -> {
+                    if (paletteIndex == index) return;
                     paletteIndex = index;
+                    paletteTitle.setText(palette.name());
                     description.setText(palette.description());
+                    poster.setBackground(background(PALETTE_POSTER[index], 21, 0));
+                    paletteArt.setArt(PALETTE_ART[index]);
+                    pop(paletteArt);
                     for (int i = 0; i < cards.size(); i++) {
                         boolean selected = i == index;
                         cards.get(i).setBackground(ripple(PANEL, 15, selected ? LIME : LINE));
@@ -305,15 +345,25 @@ public final class MainActivity extends ComponentActivity {
 
     private void roster() {
         header("PEMAIN", "Kembali", () -> show(Page.HOME));
-        block(body, display("Siapa ikut?", 42, PAPER), 22);
-        block(body, text("Masukkan nama 2–4 pemain di HP ini.", 16, MUTED, false), 8);
+        LinearLayout banner = row();
+        banner.setGravity(Gravity.CENTER_VERTICAL);
+        banner.setBackground(background(PANEL, 21, LINE));
+        pad(banner, 14, 10, 8, 10);
+        LinearLayout message = column();
+        message.addView(display("Siapa ikut?", 35, PAPER));
+        block(message, text("Masukkan nama 2–4 pemain.", 15, MUTED, false), 7);
+        banner.addView(message, new LinearLayout.LayoutParams(0, WRAP, 1));
+        StickerView team = new StickerView(this, StickerView.Art.TEAM);
+        banner.addView(team, new LinearLayout.LayoutParams(dp(96), dp(84)));
+        block(body, banner, 16);
+        pop(team);
         for (int index = 0; index < players.size(); index++) {
             int slot = index;
             LinearLayout lane = row();
             lane.setGravity(Gravity.CENTER_VERTICAL);
             lane.setBackground(background(PANEL, 17, LINE));
             pad(lane, 10, 4, 6, 4);
-            TextView number = tag(String.valueOf(index + 1), LILAC, INK);
+            TextView number = tag(String.valueOf(index + 1), PALETTE_POSTER[index], INK);
             lane.addView(number);
             EditText field = new EditText(this);
             field.setTextColor(PAPER);
@@ -364,20 +414,35 @@ public final class MainActivity extends ComponentActivity {
     private void hunt() {
         header("TARGET MISI", "Keluar", this::confirmExit);
         block(body, text("Cari benda yang warnanya mendekati target.", 17, MUTED, false), 22);
-        LinearLayout swatch = column();
+        LinearLayout swatch = row();
         int color = target().rgb();
         int foreground = ColorMatch.light(color) ? Color.BLACK : Color.WHITE;
         swatch.setBackground(background(color, 24, 0));
         pad(swatch, 19, 16, 19, 17);
-        swatch.setGravity(Gravity.BOTTOM);
+        swatch.setGravity(Gravity.CENTER_VERTICAL);
         swatch.setMinimumHeight(dp(150));
-        swatch.addView(text(Palettes.ALL[paletteIndex].name(), 14, foreground, true));
-        swatch.addView(display(target().name(), 36, foreground));
+        LinearLayout swatchName = column();
+        swatchName.addView(text(Palettes.ALL[paletteIndex].name(), 14, foreground, true));
+        block(swatchName, display(target().name(), 33, foreground), 6);
+        swatch.addView(swatchName, new LinearLayout.LayoutParams(0, WRAP, 1));
+        StickerView targetArt = new StickerView(this, StickerView.Art.TARGET);
+        swatch.addView(targetArt, new LinearLayout.LayoutParams(dp(101), dp(100)));
+        pop(targetArt);
         block(body, swatch, 15);
         timerLabel = display("", 72, LIME);
         timerLabel.setGravity(Gravity.CENTER);
         timerLabel.setTypeface(Typeface.create("monospace", Typeface.BOLD));
         block(body, timerLabel, 16);
+        FrameLayout track = new FrameLayout(this);
+        track.setBackground(background(PANEL, 5, 0));
+        track.setClipToOutline(true);
+        huntProgress = new View(this);
+        huntProgress.setBackgroundColor(LIME);
+        huntProgress.setPivotX(0);
+        track.addView(huntProgress, new FrameLayout.LayoutParams(MATCH, MATCH));
+        LinearLayout.LayoutParams trackBox = new LinearLayout.LayoutParams(MATCH, dp(8));
+        trackBox.setMargins(dp(24), dp(9), dp(24), dp(12));
+        body.addView(track, trackBox);
         TextView first = text("Giliran pertama · " + player(0), 15, MUTED, true);
         first.setGravity(Gravity.CENTER);
         block(body, first, 4);
@@ -388,7 +453,10 @@ public final class MainActivity extends ComponentActivity {
     private void updateClock() {
         if (page != Page.HUNT) return;
         long remaining = deadline - SystemClock.elapsedRealtime();
-        timerLabel.setText(time((int) Math.max(0, (remaining + 999) / 1000)));
+        String shown = time((int) Math.max(0, (remaining + 999) / 1000));
+        if (!shown.contentEquals(timerLabel.getText())) timerLabel.setText(shown);
+        if (remaining <= 5_000) timerLabel.setTextColor(PEACH);
+        huntProgress.setScaleX(Math.max(0f, remaining / (seconds * 1000f)));
         if (remaining <= 0) show(Page.CAMERA);
         else clock.postDelayed(tick, 100);
     }
@@ -405,6 +473,7 @@ public final class MainActivity extends ComponentActivity {
             block(body, button("Buka pengaturan aplikasi", PANEL, PAPER, () ->
                 startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                     android.net.Uri.fromParts("package", getPackageName(), null)))), 10);
+            for (int i = 0; i < body.getChildCount(); i++) enter(body.getChildAt(i), i * 35L);
         }
     }
 
@@ -464,8 +533,8 @@ public final class MainActivity extends ComponentActivity {
         TextView goal = text(target().name(), 14, PAPER, true);
         pad(goal, 8, 0, 6, 0);
         reading.addView(goal, new LinearLayout.LayoutParams(0, WRAP, 1));
-        TextView score = text("Menyiapkan…", 15, LIME, true);
-        reading.addView(score);
+        TextView status = text("Menyiapkan…", 14, LIME, true);
+        reading.addView(status);
         block(body, reading, 12);
 
         TextView snap = button("Ambil foto", LIME, INK, () -> {});
@@ -476,17 +545,17 @@ public final class MainActivity extends ComponentActivity {
         snap.setOnClickListener(view -> {
             if (camera != null) {
                 enabled(snap, false);
-                score.setText(R.string.camera_capturing);
+                status.setText(R.string.camera_capturing);
                 camera.takePhoto();
             }
         });
 
         LiveCamera active = new LiveCamera(this, preview, new LiveCamera.Listener() {
             @Override public void onColor(int color) {
-                setBackdrop(color);
+                tintCamera(color);
+                if (retry.getVisibility() == View.GONE) return;
                 retry.setVisibility(View.GONE);
-                if (!snap.isEnabled() && score.getText().equals(getText(R.string.camera_capturing))) return;
-                score.setText(getString(R.string.camera_match, ColorMatch.percent(target().rgb(), color)));
+                status.setText(R.string.camera_ready);
                 enabled(snap, true);
             }
             @Override public void onPhoto(Bitmap photo, int color) {
@@ -494,8 +563,8 @@ public final class MainActivity extends ComponentActivity {
             }
             @Override public void onCameraError(String message) {
                 stopCamera();
-                score.setText(message);
-                score.setTextSize(12);
+                status.setText(message);
+                status.setTextSize(12);
                 snap.setText(R.string.camera_retry);
                 snap.setOnClickListener(view -> render());
                 retry.setVisibility(View.GONE);
@@ -516,7 +585,7 @@ public final class MainActivity extends ComponentActivity {
 
     private void savePhoto(Bitmap photo, int color) {
         try {
-            Shot shot = new Shot(photos.save(photo), color, ColorMatch.percent(target().rgb(), color));
+            Shot shot = new Shot(photos.save(photo), color);
             if (currentPlayer == shots.size()) {
                 shots.add(shot);
             } else {
@@ -533,6 +602,10 @@ public final class MainActivity extends ComponentActivity {
     }
 
     private void stopCamera() {
+        if (cameraTint != null) {
+            cameraTint.cancel();
+            cameraTint = null;
+        }
         if (camera != null) {
             camera.close();
             camera = null;
@@ -547,6 +620,8 @@ public final class MainActivity extends ComponentActivity {
         LinearLayout card = column();
         pad(card, 10, 10, 10, 13);
         card.setBackground(background(PAPER, 23, 0));
+        card.setElevation(dp(4));
+        card.setRotation(-2f);
         ImageView image = picture(shot, player(currentPlayer));
         card.addView(image, new LinearLayout.LayoutParams(MATCH, dp(300)));
         LinearLayout caption = row();
@@ -554,16 +629,20 @@ public final class MainActivity extends ComponentActivity {
         pad(caption, 4, 12, 4, 0);
         TextView name = display(player(currentPlayer), 25, INK);
         caption.addView(name, new LinearLayout.LayoutParams(0, WRAP, 1));
-        caption.addView(tag(shot.score() + "% cocok", LIME, INK));
+        caption.addView(tag("Siap dikunci", LIME, INK));
         card.addView(caption);
         block(body, card, 18);
+        pop(card);
+        TextView revealHint = tag("Skor dibuka setelah foto terakhir dikunci", INK, PAPER);
+        revealHint.setGravity(Gravity.CENTER);
+        block(body, revealHint, 14);
         block(body, button("Foto ulang", INK, PAPER, () -> show(Page.CAMERA)), 12);
 
         boolean last = currentPlayer == players.size() - 1;
         if (last && players.size() < 4) {
-            block(body, button("+ Tambah pemain", INK, PAPER, this::addLatePlayer), 8);
+            block(body, button("Kunci & tambah pemain", INK, PAPER, this::addLatePlayer), 8);
         }
-        footer(button(last ? "Lihat hasil  →" : "Lanjut ke " + player(currentPlayer + 1) + "  →",
+        footer(button(last ? "Kunci foto & lihat hasil" : "Kunci & lanjut ke " + player(currentPlayer + 1),
             LIME, INK, () -> {
                 if (last) show(Page.RESULTS);
                 else {
@@ -595,32 +674,44 @@ public final class MainActivity extends ComponentActivity {
         dialog.show();
     }
 
-    private ArrayList<Integer> ranking() {
-        ArrayList<Integer> ordered = new ArrayList<>();
-        for (int i = 0; i < shots.size(); i++) ordered.add(i);
-        Collections.sort(ordered, (first, second) ->
-            Integer.compare(shots.get(second).score(), shots.get(first).score()));
-        return ordered;
-    }
-
     private void results() {
         header("HASIL MISI", "Tutup", this::returnToLobby);
-        ArrayList<Integer> ordered = ranking();
-        int best = ordered.get(0);
-        int bestScore = shots.get(best).score();
-        boolean tie = shots.get(ordered.get(1)).score() == bestScore;
-        block(body, display(tie ? "Seri di puncak!" : player(best) + " juara!", 38, PAPER), 16);
+        int[] colors = new int[shots.size()];
+        for (int i = 0; i < colors.length; i++) colors[i] = shots.get(i).color();
+        List<RoundRanking.Entry> ordered = RoundRanking.reveal(target().rgb(), players.size(), colors);
+        int best = ordered.get(0).player();
+        boolean tie = ordered.get(1).score() == ordered.get(0).score();
+        LinearLayout podium = row();
+        podium.setGravity(Gravity.CENTER_VERTICAL);
+        podium.setBackground(background(0xFFFFD677, 22, 0));
+        pad(podium, 14, 12, 11, 12);
+        LinearLayout podiumLabel = column();
+        podiumLabel.addView(display(tie ? "Seri di puncak!" : player(best) + " juara!", 33, INK));
         TextView color = tag("Target · " + target().name(), target().rgb(),
             ColorMatch.light(target().rgb()) ? Color.BLACK : Color.WHITE);
         LinearLayout.LayoutParams label = new LinearLayout.LayoutParams(WRAP, WRAP);
-        label.topMargin = dp(8);
-        body.addView(color, label);
+        label.topMargin = dp(9);
+        podiumLabel.addView(color, label);
+        podium.addView(podiumLabel, new LinearLayout.LayoutParams(0, WRAP, 1));
+        FrameLayout emblem = new FrameLayout(this);
+        if (!tie) {
+            ImageView winner = picture(shots.get(best), player(best));
+            FrameLayout.LayoutParams tile = new FrameLayout.LayoutParams(dp(84), dp(84), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+            winner.setRotation(5f);
+            emblem.addView(winner, tile);
+        }
+        StickerView crown = new StickerView(this, StickerView.Art.TROPHY);
+        emblem.addView(crown, new FrameLayout.LayoutParams(dp(76), dp(68), Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+        podium.addView(emblem, new LinearLayout.LayoutParams(dp(107), dp(tie ? 75 : 116)));
+        pop(crown);
+        block(body, podium, 15);
 
         for (int place = 0; place < ordered.size(); place++) {
-            int index = ordered.get(place);
+            var result = ordered.get(place);
+            int index = result.player();
             Shot shot = shots.get(index);
             int rank = place + 1;
-            while (rank > 1 && shots.get(ordered.get(rank - 2)).score() == shot.score()) rank--;
+            while (rank > 1 && ordered.get(rank - 2).score() == result.score()) rank--;
             LinearLayout card = row();
             card.setGravity(Gravity.CENTER_VERTICAL);
             card.setBackground(ripple(PANEL, 18, rank == 1 ? LILAC : LINE));
@@ -630,7 +721,7 @@ public final class MainActivity extends ComponentActivity {
                 full.setAdjustViewBounds(true);
                 full.setMaxHeight(dp(420));
                 new android.app.AlertDialog.Builder(this)
-                    .setTitle(player(index) + " · " + shot.score() + "% cocok")
+                    .setTitle(player(index) + " · " + result.score() + "% cocok")
                     .setView(full)
                     .setPositiveButton("Tutup", null)
                     .show();
@@ -644,7 +735,8 @@ public final class MainActivity extends ComponentActivity {
             stats.setGravity(Gravity.CENTER_VERTICAL);
             TextView name = text(rank + ". " + player(index), 15, PAPER, true);
             stats.addView(name, new LinearLayout.LayoutParams(0, WRAP, 1));
-            stats.addView(text(shot.score() + "%", 17, rank == 1 ? LIME : PAPER, true));
+            TextView percentage = text(result.score() + "%", 19, rank == 1 ? LIME : PAPER, true);
+            stats.addView(percentage);
             details.addView(stats);
             LinearLayout track = row();
             track.setBackground(background(INK, 8, 0));
@@ -652,7 +744,13 @@ public final class MainActivity extends ComponentActivity {
             View bar = new View(this);
             bar.setBackgroundColor(shot.color());
             track.setWeightSum(100);
-            track.addView(bar, new LinearLayout.LayoutParams(0, MATCH, shot.score()));
+            track.addView(bar, new LinearLayout.LayoutParams(0, MATCH, result.score()));
+            bar.setPivotX(0);
+            bar.setScaleX(0f);
+            long delay = 215L + place * 90L;
+            bar.animate().scaleX(1f).setStartDelay(delay).setDuration(390).start();
+            percentage.setAlpha(0f);
+            percentage.animate().alpha(1f).setStartDelay(delay + 100).setDuration(250).start();
             LinearLayout.LayoutParams line = new LinearLayout.LayoutParams(MATCH, dp(8));
             line.topMargin = dp(7);
             details.addView(track, line);
@@ -663,7 +761,7 @@ public final class MainActivity extends ComponentActivity {
         footer(button("Bagikan hasil", LIME, INK, () -> shareResults(ordered)));
     }
 
-    private void shareResults(ArrayList<Integer> ordered) {
+    private void shareResults(List<RoundRanking.Entry> ordered) {
         Bitmap recap = Bitmap.createBitmap(720, 154 + ordered.size() * 148, Bitmap.Config.ARGB_8888);
         try {
             Canvas paper = new Canvas(recap);
@@ -680,7 +778,8 @@ public final class MainActivity extends ComponentActivity {
             paper.drawText("Target · " + target().name(), 83, 120, ink);
 
             for (int i = 0; i < ordered.size(); i++) {
-                int index = ordered.get(i);
+                var result = ordered.get(i);
+                int index = result.player();
                 Shot shot = shots.get(index);
                 int top = 148 + 148 * i;
                 Rect imageBox = new Rect(38, top, 158, top + 120);
@@ -696,7 +795,7 @@ public final class MainActivity extends ComponentActivity {
                 paper.drawText(player(index), 179, top + 49, ink);
                 ink.setColor(LIME);
                 ink.setTextSize(28);
-                paper.drawText(shot.score() + "% cocok", 179, top + 89, ink);
+                paper.drawText(result.score() + "% cocok", 179, top + 89, ink);
             }
             File folder = new File(getCacheDir(), "share");
             folder.mkdirs();
@@ -778,6 +877,7 @@ public final class MainActivity extends ComponentActivity {
         pad(foot, 20, 9, 20, 12);
         foot.addView(action, new LinearLayout.LayoutParams(MATCH, WRAP));
         shell.addView(foot);
+        enter(foot, 115);
     }
 
     private void block(LinearLayout parent, View child, int gap) {
@@ -842,9 +942,37 @@ public final class MainActivity extends ComponentActivity {
         control.setAlpha(enabled ? 1f : 0.55f);
     }
 
+    private void enter(View view, long delay) {
+        view.setAlpha(0f);
+        view.setTranslationY(dp(13));
+        view.animate().alpha(1f).translationY(0f).setStartDelay(delay).setDuration(270)
+            .setInterpolator(new DecelerateInterpolator()).start();
+    }
+
+    private void pop(View view) {
+        view.animate().cancel();
+        view.setScaleX(0.82f);
+        view.setScaleY(0.82f);
+        view.animate().scaleX(1f).scaleY(1f).setDuration(380)
+            .setInterpolator(new OvershootInterpolator(1.45f)).start();
+    }
+
+    private void tintCamera(int color) {
+        if (cameraTint != null) cameraTint.cancel();
+        int from = backdrop;
+        cameraTint = ValueAnimator.ofFloat(0f, 1f);
+        cameraTint.setDuration(130);
+        cameraTint.addUpdateListener(animation -> setBackdrop(ColorUtils.blendARGB(from, color,
+            (float) animation.getAnimatedValue())));
+        cameraTint.start();
+    }
+
     private void setBackdrop(int color) {
+        backdrop = color;
         canvas.setBackgroundColor(color);
         boolean light = ColorMatch.light(color);
+        if (light == darkSystemIcons) return;
+        darkSystemIcons = light;
         var bars = WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
         bars.setAppearanceLightStatusBars(light);
         bars.setAppearanceLightNavigationBars(light);
